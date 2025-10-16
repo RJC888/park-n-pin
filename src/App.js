@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Trash2, Settings, ZoomIn, ZoomOut, Camera, Wifi, WifiOff } from 'lucide-react';
+import { MapPin, Trash2, Settings, ZoomIn, ZoomOut, Camera, Wifi, WifiOff, X } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -43,6 +43,7 @@ export default function ParkNPin() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
+  const [showFullPhoto, setShowFullPhoto] = useState(false);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -377,8 +378,27 @@ export default function ParkNPin() {
                   {calculateDistance(currentLocation.lat, currentLocation.lng, parkingLocation.lat, parkingLocation.lng)} miles away
                 </p>
               )}
-              {parkingPhoto && <p className="text-xs text-green-600 mt-1">📸 Photo saved</p>}
-              <button onClick={handleClearParking} className="mt-2 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1 rounded">
+              
+              {parkingPhoto && (
+                <div className="mt-3">
+                  <button 
+                    onClick={() => setShowFullPhoto(true)}
+                    className="w-full border-2 border-red-300 rounded-lg overflow-hidden hover:border-red-500 transition-colors"
+                  >
+                    <img 
+                      src={parkingPhoto} 
+                      alt="Parking spot" 
+                      className="w-full h-24 object-cover"
+                    />
+                    <div className="bg-red-100 text-red-700 text-xs py-1 px-2 flex items-center justify-center gap-1">
+                      <Camera className="w-3 h-3" />
+                      Tap to view full size
+                    </div>
+                  </button>
+                </div>
+              )}
+              
+              <button onClick={handleClearParking} className="mt-3 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded">
                 Clear Parking Pin
               </button>
             </div>
@@ -400,6 +420,22 @@ export default function ParkNPin() {
               </div>
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoCapture} className="hidden" />
             </div>
+          </div>
+        )}
+
+        {showFullPhoto && parkingPhoto && (
+          <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center p-4 z-50">
+            <button 
+              onClick={() => setShowFullPhoto(false)}
+              className="absolute top-4 right-4 bg-white rounded-full p-2 hover:bg-gray-200 transition-colors"
+            >
+              <X className="w-6 h-6 text-gray-800" />
+            </button>
+            <img 
+              src={parkingPhoto} 
+              alt="Parking spot full size" 
+              className="max-w-full max-h-full object-contain rounded-lg"
+            />
           </div>
         )}
 
