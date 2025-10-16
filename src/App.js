@@ -90,10 +90,15 @@ export default function ParkNPin() {
   useEffect(() => {
     if (mapRef.current && currentLocation && window.google) {
       if (!mapInstanceRef.current) {
-        mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-          zoom: zoomLevel,
-          center: { lat: currentLocation.lat, lng: currentLocation.lng },
-        });
+      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+  zoom: zoomLevel,
+  center: { lat: currentLocation.lat, lng: currentLocation.lng },
+  gestureHandling: 'greedy',
+  zoomControl: false,
+  mapTypeControl: false,
+  streetViewControl: false,
+  fullscreenControl: false,
+});
       } else {
         mapInstanceRef.current.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
         mapInstanceRef.current.setZoom(zoomLevel);
