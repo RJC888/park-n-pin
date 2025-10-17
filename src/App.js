@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Trash2, Settings, ZoomIn, ZoomOut, Camera, Wifi, WifiOff, X } from 'lucide-react';
+import { MapPin, Trash2, Settings, ZoomIn, ZoomOut, Camera, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -37,20 +37,26 @@ export default function ParkNPin() {
   const [parkingLocation, setParkingLocation] = useState(null);
   const [parkingPhoto, setParkingPhoto] = useState(null);
   const [savedLocations, setSavedLocations] = useState([]);
+  const [parkingHistory, setParkingHistory] = useState([]);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [screen, setScreen] = useState('map');
   const [isAnimating, setIsAnimating] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
-  const [showFullPhoto, setShowFullPhoto] = useState(false);
-  const [parkingHistory, setParkingHistory] = useState([]);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  
+  // 🆕 PHASE 3: Bottom sheet states
+  const [sheetState, setSheetState] = useState('collapsed');
+  const [touchStart, setTouchStart] = useState(0);
+  const [touchEnd, setTouchEnd] = useState(0);
+  
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const sheetRef = useRef(null);
 
-  // Load cached data on startup
+  // Load cached data + history on startup
   useEffect(() => {
     loadCachedData();
     loadParkingHistory();
@@ -89,19 +95,15 @@ export default function ParkNPin() {
     }
   }, []);
 
-  // Initialize Google Map
+  // Initialize Google Map with gestureHandling: 'greedy' (PHASE 1 FIX)
   useEffect(() => {
     if (mapRef.current && currentLocation && window.google) {
       if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-  zoom: zoomLevel,
-  center: { lat: currentLocation.lat, lng: currentLocation.lng },
-  gestureHandling: 'greedy',
-  zoomControl: false,
-  mapTypeControl: false,
-  streetViewControl: false,
-  fullscreenControl: false,
-});
+        mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+          zoom: zoomLevel,
+          center: { lat: currentLocation.lat, lng: currentLocation.lng },
+          gestureHandling: 'greedy', // PHASE 1: Pinch zoom fix
+        });
       } else {
         mapInstanceRef.current.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
         mapInstanceRef.current.setZoom(zoomLevel);
@@ -171,6 +173,15 @@ export default function ParkNPin() {
       if (document.head.contains(script)) document.head.removeChild(script);
     };
   }, []);
+
+  // 🆕 PHASE 3: Update sheet state when photo changes
+  useEffect(() => {
+    if (parkingPhoto) {
+      setSheetState('collapsed');
+    } else {
+      setSheetState('hidden');
+    }
+  }, [parkingPhoto]);
 
   const loadCachedData = () => {
     const cached = localStorage.getItem('parkNPinCache');
@@ -253,12 +264,46 @@ export default function ParkNPin() {
     }
   };
 
+  // PHASE 2: Parking History Functions
+  const loadParkingHistory = () => {
+    const history = localStorage.getItem('parkingHistory');
+    if (history) {
+      setParkingHistory(JSON.parse(history));
+    }
+  };
+
+  const saveParkingHistory = (location, photo) => {
+    const newEntry = {
+      id: Date.now(),
+      location,
+      photo,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [newEntry, ...parkingHistory].slice(0, 5);
+    setParkingHistory(updated);
+    localStorage.setItem('parkingHistory', JSON.stringify(updated));
+  };
+
+  const restoreFromHistory = (entry) => {
+    setParkingLocation(entry.location);
+    setParkingPhoto(entry.photo);
+    saveToCache(entry.location, savedLocations, entry.photo);
+    setScreen('map');
+  };
+
+  const clearParkingHistory = () => {
+    setParkingHistory([]);
+    localStorage.removeItem('parkingHistory');
+  };
+
   const handlePinCar = () => {
     if (!currentLocation) return;
-    // Save previous location to history before creating new pin
-  if (parkingLocation) {
-    saveToParkingHistory(parkingLocation, parkingPhoto);
-  }
+    
+    // PHASE 2: Save current parking to history before creating new pin
+    if (parkingLocation) {
+      saveParkingHistory(parkingLocation, parkingPhoto);
+    }
+    
     setIsAnimating(true);
     setParkingLocation(currentLocation);
     setShowPhotoPrompt(true);
@@ -323,10 +368,24 @@ export default function ParkNPin() {
     }
   };
 
+  // PHASE 2: Confirmation dialog for clearing parking
   const handleClearParking = () => {
+    setShowClearConfirm(true);
+  };
+
+  const confirmClearParking = () => {
+    // Save to history before clearing
+    if (parkingLocation) {
+      saveParkingHistory(parkingLocation, parkingPhoto);
+    }
     setParkingLocation(null);
     setParkingPhoto(null);
     saveToCache(null, savedLocations, null);
+    setShowClearConfirm(false);
+  };
+
+  const cancelClearParking = () => {
+    setShowClearConfirm(false);
   };
 
   const calculateDistance = (lat1, lng1, lat2, lng2) => {
@@ -338,54 +397,45 @@ export default function ParkNPin() {
     return (R * c).toFixed(1);
   };
 
-
-  // PARKING HISTORY MODULE - Reusable for any location tracking
-const saveToParkingHistory = (location, photo) => {
-  const historyEntry = {
-    id: Date.now(),
-    location: location,
-    photo: photo,
-    timestamp: new Date().toISOString(),
-    address: 'Loading...',
+  // 🆕 PHASE 3: Bottom Sheet Touch Handlers
+  const handleTouchStart = (e) => {
+    setTouchStart(e.targetTouches[0].clientY);
   };
-  
-  const updatedHistory = [historyEntry, ...parkingHistory].slice(0, 5);
-  setParkingHistory(updatedHistory);
-  localStorage.setItem('parkingHistory', JSON.stringify(updatedHistory));
-};
 
-const loadParkingHistory = () => {
-  const saved = localStorage.getItem('parkingHistory');
-  if (saved) {
-    setParkingHistory(JSON.parse(saved));
-  }
-};
+  const handleTouchMove = (e) => {
+    setTouchEnd(e.targetTouches[0].clientY);
+  };
 
-const restoreFromHistory = (historyEntry) => {
-  setParkingLocation(historyEntry.location);
-  setParkingPhoto(historyEntry.photo);
-  saveToCache(historyEntry.location, savedLocations, historyEntry.photo);
-};
+  const handleTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    
+    const distance = touchStart - touchEnd;
+    const isSwipeUp = distance > 50;
+    const isSwipeDown = distance < -50;
 
-const handleClearParkingWithConfirm = () => {
-  if (parkingLocation) {
-    saveToParkingHistory(parkingLocation, parkingPhoto);
-  }
-  setShowClearConfirm(true);
-};
+    if (isSwipeUp && sheetState === 'collapsed') {
+      setSheetState('expanded');
+    } else if (isSwipeDown && sheetState === 'expanded') {
+      setSheetState('collapsed');
+    }
 
-const confirmClearParking = () => {
-  setParkingLocation(null);
-  setParkingPhoto(null);
-  saveToCache(null, savedLocations, null);
-  setShowClearConfirm(false);
-};
+    setTouchStart(0);
+    setTouchEnd(0);
+  };
+
+  const toggleSheet = () => {
+    if (sheetState === 'collapsed') {
+      setSheetState('expanded');
+    } else if (sheetState === 'expanded') {
+      setSheetState('collapsed');
+    }
+  };
 
   // MAP SCREEN
   if (screen === 'map') {
     return (
-      <div className="h-screen w-full bg-white flex flex-col">
-        <div className="bg-white border-b border-gray-200 p-4 shadow-sm">
+      <div className="h-screen w-full bg-white flex flex-col relative">
+        <div className="bg-white border-b border-gray-200 p-4 shadow-sm z-10">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-800 flex items-center">
               <MapPin className="w-6 h-6 text-red-500 mr-2" />
@@ -416,7 +466,7 @@ const confirmClearParking = () => {
             </div>
           )}
 
-          <div className="absolute top-4 right-4 bg-white rounded-lg shadow-md p-2 flex flex-col gap-2">
+          <div className="absolute top-4 right-4 bg-white rounded-lg shadow-md p-2 flex flex-col gap-2 z-10">
             <button onClick={() => setZoomLevel(prev => Math.min(prev + 1, 20))} className="p-2 hover:bg-blue-100 rounded">
               <ZoomIn className="w-5 h-5 text-blue-600" />
             </button>
@@ -425,7 +475,7 @@ const confirmClearParking = () => {
             </button>
           </div>
 
-          {parkingLocation && (
+          {parkingLocation && !parkingPhoto && (
             <div className="absolute bottom-4 left-4 bg-red-50 border-2 border-red-200 rounded-lg shadow-md p-4 max-w-xs z-40">
               <p className="text-sm font-bold text-red-700">🅿️ Your Car</p>
               {currentLocation && (
@@ -433,32 +483,112 @@ const confirmClearParking = () => {
                   {calculateDistance(currentLocation.lat, currentLocation.lng, parkingLocation.lat, parkingLocation.lng)} miles away
                 </p>
               )}
-              
-              {parkingPhoto && (
-                <div className="mt-3">
-                  <button 
-                    onClick={() => setShowFullPhoto(true)}
-                    className="w-full border-2 border-red-300 rounded-lg overflow-hidden hover:border-red-500 transition-colors"
-                  >
-                    <img 
-                      src={parkingPhoto} 
-                      alt="Parking spot" 
-                      className="w-full h-24 object-cover"
-                    />
-                    <div className="bg-red-100 text-red-700 text-xs py-1 px-2 flex items-center justify-center gap-1">
-                      <Camera className="w-3 h-3" />
-                      Tap to view full size
-                    </div>
-                  </button>
-                </div>
-              )}
-              
-              <button onClick={handleClearParkingWithConfirm} className="mt-3 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded">
+              <button onClick={handleClearParking} className="mt-2 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1 rounded">
                 Clear Parking Pin
               </button>
             </div>
           )}
         </div>
+
+        {/* 🆕 PHASE 3: SWIPEABLE PHOTO BOTTOM SHEET */}
+        {sheetState !== 'hidden' && (
+          <div
+            ref={sheetRef}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            className={`fixed bottom-0 left-0 right-0 bg-white shadow-2xl transition-all duration-300 ease-out z-50 ${
+              sheetState === 'collapsed' ? 'h-20' : 'h-96'
+            }`}
+            style={{
+              borderTopLeftRadius: '20px',
+              borderTopRightRadius: '20px',
+            }}
+          >
+            {/* Drag Handle */}
+            <div 
+              onClick={toggleSheet}
+              className="w-full flex justify-center items-center py-3 cursor-pointer"
+            >
+              <div className="w-12 h-1 bg-gray-300 rounded-full" />
+            </div>
+
+            {/* Collapsed View */}
+            {sheetState === 'collapsed' && (
+              <div onClick={toggleSheet} className="px-4 pb-3 cursor-pointer">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-lg overflow-hidden border-2 border-red-200 flex-shrink-0">
+                    <img src={parkingPhoto} alt="Parking spot" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-700">🅿️ Your Car</p>
+                    {currentLocation && parkingLocation && (
+                      <p className="text-xs text-red-600">
+                        {calculateDistance(currentLocation.lat, currentLocation.lng, parkingLocation.lat, parkingLocation.lng)} miles away
+                      </p>
+                    )}
+                  </div>
+                  <ChevronUp className="w-5 h-5 text-gray-400" />
+                </div>
+              </div>
+            )}
+
+            {/* Expanded View */}
+            {sheetState === 'expanded' && (
+              <div className="px-4 pb-4 h-full overflow-y-auto">
+                <div className="flex justify-between items-center mb-3">
+                  <div>
+                    <p className="text-lg font-bold text-red-700">🅿️ Your Car</p>
+                    {currentLocation && parkingLocation && (
+                      <p className="text-sm text-red-600">
+                        {calculateDistance(currentLocation.lat, currentLocation.lng, parkingLocation.lat, parkingLocation.lng)} miles away
+                      </p>
+                    )}
+                  </div>
+                  <button onClick={toggleSheet} className="p-2 hover:bg-gray-100 rounded-lg">
+                    <ChevronDown className="w-6 h-6 text-gray-600" />
+                  </button>
+                </div>
+                
+                <div className="rounded-lg overflow-hidden border-2 border-red-200 mb-3">
+                  <img src={parkingPhoto} alt="Parking spot" className="w-full h-auto" />
+                </div>
+
+                <button 
+                  onClick={handleClearParking} 
+                  className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-5 h-5" />
+                  Clear Parking Pin
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PHASE 2: Clear Confirmation Dialog */}
+        {showClearConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm">
+              <p className="text-lg font-bold text-gray-800 mb-2">Clear parking pin?</p>
+              <p className="text-sm text-gray-600 mb-4">This will save your current location to history.</p>
+              <div className="flex gap-2">
+                <button 
+                  onClick={cancelClearParking} 
+                  className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmClearParking} 
+                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-2 rounded-lg"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showPhotoPrompt && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -478,49 +608,7 @@ const confirmClearParking = () => {
           </div>
         )}
 
-{/* Parking History Confirmation Dialog */}
-{showClearConfirm && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm">
-      <p className="text-lg font-bold text-gray-800 mb-2">Clear parking pin?</p>
-      <p className="text-sm text-gray-600 mb-4">
-        Your location will be saved to history and can be restored.
-      </p>
-      <div className="flex gap-2">
-        <button 
-          onClick={() => setShowClearConfirm(false)} 
-          className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 rounded-lg"
-        >
-          Cancel
-        </button>
-        <button 
-          onClick={confirmClearParking} 
-          className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-2 rounded-lg"
-        >
-          Clear Pin
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-
-        {showFullPhoto && parkingPhoto && (
-          <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center p-4 z-50">
-            <button 
-              onClick={() => setShowFullPhoto(false)}
-              className="absolute top-4 right-4 bg-white rounded-full p-2 hover:bg-gray-200 transition-colors"
-            >
-              <X className="w-6 h-6 text-gray-800" />
-            </button>
-            <img 
-              src={parkingPhoto} 
-              alt="Parking spot full size" 
-              className="max-w-full max-h-full object-contain rounded-lg"
-            />
-          </div>
-        )}
-
-        <div className="bg-white border-t border-gray-200 p-4 shadow-lg">
+        <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-10">
           <div className="flex gap-2 mb-3">
             <button onClick={handlePinCar} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 text-lg">
               <MapPin className="w-6 h-6" />
@@ -533,7 +621,7 @@ const confirmClearParking = () => {
           </div>
         </div>
 
-        <div className="bg-gray-50 border-t max-h-32 overflow-y-auto">
+        <div className="bg-gray-50 border-t max-h-32 overflow-y-auto z-10">
           {savedLocations.length > 0 && (
             <div className="p-3">
               <p className="text-xs font-semibold text-gray-600 mb-2">📍 Saved Locations</p>
@@ -569,42 +657,79 @@ const confirmClearParking = () => {
             <p className="text-sm">{isOnline ? '🟢 Online' : '🔴 Offline'}</p>
             {isSyncing && <p className="text-blue-600 text-sm">⏳ Syncing...</p>}
           </div>
+
+          {/* PHASE 2: Parking History */}
+          <div className="bg-white rounded-lg p-4 shadow">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-semibold">Parking History</h3>
+              {parkingHistory.length > 0 && (
+                <button 
+                  onClick={clearParkingHistory}
+                  className="text-xs text-red-500 hover:text-red-700"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
+            {parkingHistory.length === 0 ? (
+              <p className="text-sm text-gray-500">No parking history yet</p>
+            ) : (
+              <div className="space-y-2">
+                {parkingHistory.map((entry) => (
+                  <div 
+                    key={entry.id}
+                    className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <p className="text-xs text-gray-500">
+                          {new Date(entry.timestamp).toLocaleString()}
+                        </p>
+                        {currentLocation && (
+                          <p className="text-sm font-semibold text-gray-700 mt-1">
+                            {calculateDistance(
+                              currentLocation.lat,
+                              currentLocation.lng,
+                              entry.location.lat,
+                              entry.location.lng
+                            )} miles away
+                          </p>
+                        )}
+                      </div>
+                      {entry.photo && (
+                        <div className="w-12 h-12 rounded overflow-hidden border border-gray-200 ml-2">
+                          <img 
+                            src={entry.photo} 
+                            alt="Parking" 
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => restoreFromHistory(entry)}
+                      className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xs font-semibold py-2 rounded"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="bg-white rounded-lg p-4 shadow">
             <h3 className="font-semibold mb-3">About</h3>
-            <p className="text-sm">Park-N-Pin v2.0</p>
+            <p className="text-sm">Park-N-Pin v3.0</p>
             <p className="text-xs text-gray-500 mt-2">Never lose your car again.</p>
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <p className="text-xs text-gray-600">✅ Phase 1: Pinch zoom fixed</p>
+              <p className="text-xs text-gray-600">✅ Phase 2: Parking history added</p>
+              <p className="text-xs text-gray-600">✅ Phase 3: Swipeable photo sheet</p>
+            </div>
           </div>
         </div>
       </div>
-
-             {parkingHistory.length > 0 && (
-  <div className="bg-white rounded-lg p-4 shadow">
-    <h3 className="font-semibold mb-3">Parking History</h3>
-    {parkingHistory.map((entry) => (
-      <div key={entry.id} className="border-b py-2 last:border-b-0">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm font-medium">
-              {new Date(entry.timestamp).toLocaleString()}
-            </p>
-            <p className="text-xs text-gray-500">
-              Lat: {entry.location.lat.toFixed(4)}, Lng: {entry.location.lng.toFixed(4)}
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              restoreFromHistory(entry);
-              setScreen('map');
-            }}
-            className="bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1 rounded"
-          >
-            Restore
-          </button>
-        </div>
-      </div>
-    ))}
-  </div>
-)}
     );
   }
 }
