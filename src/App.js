@@ -44,6 +44,8 @@ export default function ParkNPin() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
   const [showFullPhoto, setShowFullPhoto] = useState(false);
+  const [parkingHistory, setParkingHistory] = useState([]);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -51,6 +53,7 @@ export default function ParkNPin() {
   // Load cached data on startup
   useEffect(() => {
     loadCachedData();
+    loadParkingHistory();
     if (isOnline) loadCloudData();
   }, []);
 
@@ -252,6 +255,10 @@ export default function ParkNPin() {
 
   const handlePinCar = () => {
     if (!currentLocation) return;
+    // Save previous location to history before creating new pin
+  if (parkingLocation) {
+    saveToParkingHistory(parkingLocation, parkingPhoto);
+  }
     setIsAnimating(true);
     setParkingLocation(currentLocation);
     setShowPhotoPrompt(true);
@@ -331,6 +338,49 @@ export default function ParkNPin() {
     return (R * c).toFixed(1);
   };
 
+
+  // PARKING HISTORY MODULE - Reusable for any location tracking
+const saveToParkingHistory = (location, photo) => {
+  const historyEntry = {
+    id: Date.now(),
+    location: location,
+    photo: photo,
+    timestamp: new Date().toISOString(),
+    address: 'Loading...',
+  };
+  
+  const updatedHistory = [historyEntry, ...parkingHistory].slice(0, 5);
+  setParkingHistory(updatedHistory);
+  localStorage.setItem('parkingHistory', JSON.stringify(updatedHistory));
+};
+
+const loadParkingHistory = () => {
+  const saved = localStorage.getItem('parkingHistory');
+  if (saved) {
+    setParkingHistory(JSON.parse(saved));
+  }
+};
+
+const restoreFromHistory = (historyEntry) => {
+  setParkingLocation(historyEntry.location);
+  setParkingPhoto(historyEntry.photo);
+  saveToCache(historyEntry.location, savedLocations, historyEntry.photo);
+};
+
+const handleClearParkingWithConfirm = () => {
+  if (parkingLocation) {
+    saveToParkingHistory(parkingLocation, parkingPhoto);
+  }
+  setShowClearConfirm(true);
+};
+
+const confirmClearParking = () => {
+  setParkingLocation(null);
+  setParkingPhoto(null);
+  saveToCache(null, savedLocations, null);
+  setShowClearConfirm(false);
+};
+
   // MAP SCREEN
   if (screen === 'map') {
     return (
@@ -403,7 +453,7 @@ export default function ParkNPin() {
                 </div>
               )}
               
-              <button onClick={handleClearParking} className="mt-3 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded">
+              <button onClick={handleClearParkingWithConfirm} className="mt-3 w-full bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-2 rounded">
                 Clear Parking Pin
               </button>
             </div>
@@ -427,6 +477,32 @@ export default function ParkNPin() {
             </div>
           </div>
         )}
+
+{/* Parking History Confirmation Dialog */}
+{showClearConfirm && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm">
+      <p className="text-lg font-bold text-gray-800 mb-2">Clear parking pin?</p>
+      <p className="text-sm text-gray-600 mb-4">
+        Your location will be saved to history and can be restored.
+      </p>
+      <div className="flex gap-2">
+        <button 
+          onClick={() => setShowClearConfirm(false)} 
+          className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button 
+          onClick={confirmClearParking} 
+          className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-2 rounded-lg"
+        >
+          Clear Pin
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
         {showFullPhoto && parkingPhoto && (
           <div className="fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center p-4 z-50">
@@ -500,6 +576,35 @@ export default function ParkNPin() {
           </div>
         </div>
       </div>
+
+             {parkingHistory.length > 0 && (
+  <div className="bg-white rounded-lg p-4 shadow">
+    <h3 className="font-semibold mb-3">Parking History</h3>
+    {parkingHistory.map((entry) => (
+      <div key={entry.id} className="border-b py-2 last:border-b-0">
+        <div className="flex justify-between items-center">
+          <div>
+            <p className="text-sm font-medium">
+              {new Date(entry.timestamp).toLocaleString()}
+            </p>
+            <p className="text-xs text-gray-500">
+              Lat: {entry.location.lat.toFixed(4)}, Lng: {entry.location.lng.toFixed(4)}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              restoreFromHistory(entry);
+              setScreen('map');
+            }}
+            className="bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1 rounded"
+          >
+            Restore
+          </button>
+        </div>
+      </div>
+    ))}
+  </div>
+)}
     );
   }
 }
