@@ -504,7 +504,7 @@ export default function ParkNPin() {
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
-            className={`fixed bottom-0 left-0 right-0 bg-white shadow-2xl transition-all duration-300 ease-out z-50 ${
+            className={`fixed bottom-0 left-0 right-0 bg-white shadow-2xl transition-all duration-300 ease-out z-40 ${
               sheetState === 'collapsed' ? 'h-20' : 'h-96'
             }`}
             style={{
@@ -615,7 +615,7 @@ export default function ParkNPin() {
           </div>
         )}
 
-        <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-10" style={{ paddingBottom: sheetState === 'collapsed' ? '5rem' : '1rem' }}>
+        <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-50" style={{ paddingBottom: sheetState === 'collapsed' ? '5rem' : '1rem', position: 'relative' }}>
           <div className="flex gap-2 mb-3">
             <button onClick={handlePinCar} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 text-lg">
               <MapPin className="w-6 h-6" />
