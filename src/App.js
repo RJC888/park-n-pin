@@ -399,14 +399,21 @@ export default function ParkNPin() {
 
   // 🆕 PHASE 3: Bottom Sheet Touch Handlers
   const handleTouchStart = (e) => {
+    // Prevent interference with map interactions
+    e.stopPropagation();
     setTouchStart(e.targetTouches[0].clientY);
   };
 
   const handleTouchMove = (e) => {
+    // Prevent interference with map interactions
+    e.stopPropagation();
     setTouchEnd(e.targetTouches[0].clientY);
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = (e) => {
+    // Prevent interference with map interactions
+    if (e) e.stopPropagation();
+    
     if (!touchStart || !touchEnd) return;
     
     const distance = touchStart - touchEnd;
@@ -608,7 +615,7 @@ export default function ParkNPin() {
           </div>
         )}
 
-        <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-10">
+        <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-10" style={{ paddingBottom: sheetState === 'collapsed' ? '5rem' : '1rem' }}>
           <div className="flex gap-2 mb-3">
             <button onClick={handlePinCar} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 text-lg">
               <MapPin className="w-6 h-6" />
